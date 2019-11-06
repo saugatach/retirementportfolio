@@ -8,16 +8,33 @@
 from glob import glob
 from ofxparse import OfxParser
 import pandas as pd
+import re
 
 
 def exporttransactions(qfx):
 
     transactions = qfx.account.statement.transactions
+    # get the data headers
+    ll = dir(qfx.account.statement.transactions[0])
+    regex = re.compile(r'^(?!__)')
+    # props starting with __ like __reduce__ are methods not data. Filter them out
+    props = list(filter(regex.search, ll))
+    props = props[1:]
 
-    listoftransactions = []
-    for t in transactions:
-        listoftransactions.append([t.tradeDate, t.security, t.income_type, t.memo, float(t.units), float(t.unit_price)])
-    df_transactions = pd.DataFrame(listoftransactions, columns=['Date', 'security', 'income_type', 'memo', 'units', 'unit_price'])
+    alltransactions = []
+    for t in qfx.account.statement.transactions:
+        singletransaction = []
+        for p in props:
+            singletransaction.append(getattr(t, p))
+        alltransactions.append(singletransaction)
+
+    tempdf = pd.DataFrame(alltransactions, columns=props)
+
+    # Dropping few columns manually. However, the original data is fully imported in tempdf.
+    # We can test for new data in dropped columns by tempdf[colname].unique()
+
+    df_transactions = tempdf[['settleDate', 'security', 'income_type', 'memo', 'type', 'unit_price', 'units', 'total']]
+    df_transactions = df_transactions.rename(columns={'settleDate': 'Date'})
 
     securities = qfx.security_list
 
@@ -28,12 +45,14 @@ def exporttransactions(qfx):
     df_securities = pd.DataFrame(listofsecurities, columns=['security', 'ticker', 'name'])
 
     df_transactions = df_transactions.merge(df_securities, on='security')
-    df_transactions = df_transactions[['Date', 'security', 'ticker', 'name', 'income_type', 'memo', 'units', 'unit_price'] ]
+    df_transactions = df_transactions[['Date', 'security', 'ticker', 'name', 'income_type', 'memo',
+                                       'units', 'unit_price'] ]
     df_transactions['price'] = df_transactions['units']*df_transactions['unit_price']
 
     df_transactions = df_transactions.sort_values(by=['Date'])
 
     return df_transactions
+# ---------------------------------------------------------------------------------------------------------------------
 
 
 dfs = []
@@ -64,6 +83,4 @@ print("Output written to:", outputfilename)
 # find total contribution and dividends
 print("Total Contribution:", df[(df['memo'] == 'Contribution')]['price'].sum())
 print("Total Dividends:", df[(df['memo'] == 'Dividends and Earnings')]['price'].sum())
-
-
 
